@@ -1,5 +1,7 @@
+using LiteDB;
 using Microsoft.Extensions.Logging;
 using SmartBot.Models;
+using System;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Polling;
@@ -125,13 +127,31 @@ public class BotUpdateHandler : IUpdateHandler
 
         if (message.From?.Id != _settings.BotConfiguration.AdminUserId)
         {
+            string welcomeMessage = """
+                                        Salom! 👋 Men sizning guruhlaringiz uchun maxsus **reklamasiz botman**.
+                                        
+                                        Meni guruhga qo‘shing va admin huquqlarini bering — shunda men quyidagilarni qilaman:
+                                        
+                                        🚫 Har qanday reklama va spam xabarlarini avtomatik aniqlayman va o‘chirishim mumkin;
+                                        
+                                        🌐 Krilcha, lotincha, ruscha va boshqa tillarda yozilgan reklamalarni ham sezaman;
+                                        
+                                        🔒 Guruhdagi tartibni saqlayman va foydalanuvchilarni bezovta qiluvchi xabarlarni bloklayman;
+                                        
+                                        ⚡ Xabarlar tez va samarali tarzda filtrlash orqali guruhingiz toza va qulay bo‘lishini ta’minlayman.
+                                        
+                                        Guruhingizni tartibli va qiziqarli qilishni xohlaysizmi? Shunda darhol meni admin qiling va ishga tushiring! 🚀
+                                        """;
+
             await botClient.SendTextMessageAsync(
-                message.Chat.Id,
-                "Salom! Men guruhlar uchun moderator botman. Meni guruhga qo'shing va admin qiling!",
+                chatId: message.Chat.Id,
+                text: welcomeMessage,
                 cancellationToken: cancellationToken
             );
+
             return;
         }
+
 
         // Admin commands
         await HandleAdminCommandAsync(botClient, message, cancellationToken);
