@@ -9,6 +9,8 @@ public interface IDatabaseService
     void AddOrUpdateGroup(long chatId, string title);
     void RemoveGroup(long chatId);
     List<GroupInfo> GetAllGroups();
+    List<GroupInfo> GetAllGroupsIncludingInactive();
+    GroupInfo? GetGroup(long chatId);
     void TrackUserJoin(long userId, long chatId);
     bool IsNewUser(long userId, long chatId, int timeWindowMinutes);
     void IncrementDeletedJoinMessages(long chatId);
@@ -19,6 +21,7 @@ public interface IDatabaseService
 
     // Advertisement management
     void AddAdvertisement(string text);
+    void AddAdvertisementWithMedia(string text, string mediaType, string mediaFileId);
     List<Advertisement> GetAllAdvertisements();
     Advertisement? GetAdvertisement(int id);
     void DeleteAdvertisement(int id);
@@ -123,6 +126,16 @@ public class DatabaseService : IDatabaseService, IDisposable
         return _groups.Query().Where(g => g.IsActive).ToList();
     }
 
+    public List<GroupInfo> GetAllGroupsIncludingInactive()
+    {
+        return _groups.FindAll().ToList();
+    }
+
+    public GroupInfo? GetGroup(long chatId)
+    {
+        return _groups.FindOne(g => g.ChatId == chatId);
+    }
+
     public void TrackUserJoin(long userId, long chatId)
     {
         try
@@ -179,11 +192,17 @@ public class DatabaseService : IDatabaseService, IDisposable
         try
         {
             var stat = _statistics.FindOne(s => s.ChatId == chatId);
+
+            // Get the group title to store with statistics
+            var group = _groups.FindOne(g => g.ChatId == chatId);
+            var chatTitle = group?.Title;
+
             if (stat == null)
             {
                 stat = new BotStatistics
                 {
                     ChatId = chatId,
+                    ChatTitle = chatTitle,
                     LastUpdated = DateTime.UtcNow
                 };
                 incrementAction(stat);
@@ -191,6 +210,11 @@ public class DatabaseService : IDatabaseService, IDisposable
             }
             else
             {
+                // Update chat title if available (in case it changed)
+                if (!string.IsNullOrEmpty(chatTitle))
+                {
+                    stat.ChatTitle = chatTitle;
+                }
                 incrementAction(stat);
                 stat.LastUpdated = DateTime.UtcNow;
                 _statistics.Update(stat);
@@ -232,6 +256,30 @@ public class DatabaseService : IDatabaseService, IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error adding advertisement");
+        }
+    }
+
+    public void AddAdvertisementWithMedia(string text, string mediaType, string mediaFileId)
+    {
+        try
+        {
+            var allAds = _advertisements.FindAll().ToList();
+            var maxOrder = allAds.Any() ? allAds.Max(a => a.DisplayOrder) : 0;
+            var ad = new Advertisement
+            {
+                Text = text,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+                DisplayOrder = maxOrder + 1,
+                MediaType = mediaType,
+                MediaFileId = mediaFileId
+            };
+            _advertisements.Insert(ad);
+            _logger.LogInformation("Added new advertisement with media (type: {MediaType}) with ID {AdId}", mediaType, ad.Id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error adding advertisement with media");
         }
     }
 

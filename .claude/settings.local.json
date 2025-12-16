@@ -6,7 +6,10 @@
       "Bash(dotnet add:*)",
       "Bash(dotnet add package:*)",
       "Bash(dotnet build:*)",
-      "Bash(dotnet remove:*)"
+      "Bash(dotnet remove:*)",
+      "Bash(taskkill:*)",
+      "Bash(tree:*)",
+      "Bash(dir:*)"
     ]
   }
 }
