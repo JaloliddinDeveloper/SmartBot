@@ -62,6 +62,10 @@ public class BotUpdateHandler : IUpdateHandler
 
         // Handle group messages
         var chatId = message.Chat.Id;
+        var chatTitle = message.Chat.Title ?? "Unknown Group";
+
+        // Ensure the group is tracked in database (in case MyChatMember event was missed)
+        _databaseService.AddOrUpdateGroup(chatId, chatTitle);
 
         // Delete join/leave messages
         if (_settings.Features.AutoDeleteJoinLeaveMessages)
@@ -113,15 +117,49 @@ public class BotUpdateHandler : IUpdateHandler
             }
         }
 
-        // Handle admin commands
-        if (message.From?.Id == _settings.BotConfiguration.AdminUserId && message.Text != null)
+        // Handle commands in groups
+        if (message.Text != null)
         {
-            await HandleAdminCommandAsync(botClient, message, cancellationToken);
+            // Check if user is bot owner (full admin)
+            if (message.From?.Id == _settings.BotConfiguration.AdminUserId)
+            {
+                await HandleAdminCommandAsync(botClient, message, cancellationToken);
+            }
+            // Check if user is group admin
+            else if (await IsUserGroupAdmin(botClient, chatId, message.From!.Id, cancellationToken))
+            {
+                await HandleGroupAdminCommandAsync(botClient, message, cancellationToken);
+            }
         }
     }
 
     private async Task HandlePrivateMessageAsync(ITelegramBotClient botClient, Message message, CancellationToken cancellationToken)
     {
+        // Check if admin is sending media (photo/video/document) as ad
+        if (message.From?.Id == _settings.BotConfiguration.AdminUserId)
+        {
+            // Handle photo with caption as advertisement
+            if (message.Photo != null && !string.IsNullOrEmpty(message.Caption))
+            {
+                await HandleAddMediaAdAsync(botClient, message, "photo", message.Photo.Last().FileId, cancellationToken);
+                return;
+            }
+
+            // Handle video with caption as advertisement
+            if (message.Video != null && !string.IsNullOrEmpty(message.Caption))
+            {
+                await HandleAddMediaAdAsync(botClient, message, "video", message.Video.FileId, cancellationToken);
+                return;
+            }
+
+            // Handle document with caption as advertisement
+            if (message.Document != null && !string.IsNullOrEmpty(message.Caption))
+            {
+                await HandleAddMediaAdAsync(botClient, message, "document", message.Document.FileId, cancellationToken);
+                return;
+            }
+        }
+
         if (message.Text == null)
             return;
 
@@ -129,17 +167,17 @@ public class BotUpdateHandler : IUpdateHandler
         {
             string welcomeMessage = """
                                         Salom! 👋 Men sizning guruhlaringiz uchun maxsus **reklamasiz botman**.
-                                        
-                                        Meni guruhga qo‘shing va admin huquqlarini bering — shunda men quyidagilarni qilaman:
-                                        
-                                        🚫 Har qanday reklama va spam xabarlarini avtomatik aniqlayman va o‘chirishim mumkin;
-                                        
+
+                                        Meni guruhga qo'shing va admin huquqlarini bering — shunda men quyidagilarni qilaman:
+
+                                        🚫 Har qanday reklama va spam xabarlarini avtomatik aniqlayman va o'chirishim mumkin;
+
                                         🌐 Krilcha, lotincha, ruscha va boshqa tillarda yozilgan reklamalarni ham sezaman;
-                                        
+
                                         🔒 Guruhdagi tartibni saqlayman va foydalanuvchilarni bezovta qiluvchi xabarlarni bloklayman;
-                                        
-                                        ⚡ Xabarlar tez va samarali tarzda filtrlash orqali guruhingiz toza va qulay bo‘lishini ta’minlayman.
-                                        
+
+                                        ⚡ Xabarlar tez va samarali tarzda filtrlash orqali guruhingiz toza va qulay bo'lishini ta'minlayman.
+
                                         Guruhingizni tartibli va qiziqarli qilishni xohlaysizmi? Shunda darhol meni admin qiling va ishga tushiring! 🚀
                                         """;
 
@@ -157,6 +195,32 @@ public class BotUpdateHandler : IUpdateHandler
         await HandleAdminCommandAsync(botClient, message, cancellationToken);
     }
 
+    private async Task HandleGroupAdminCommandAsync(ITelegramBotClient botClient, Message message, CancellationToken cancellationToken)
+    {
+        var command = message.Text?.ToLower().Trim();
+
+        switch (command)
+        {
+            case "/start":
+            case "/help":
+                await SendGroupHelpMessageAsync(botClient, message.Chat.Id, cancellationToken);
+                break;
+
+            case "/stats":
+            case "/statistics":
+                await SendGroupStatisticsAsync(botClient, message.Chat.Id, cancellationToken);
+                break;
+
+            case var cmd when cmd?.StartsWith("/setadinterval ") == true:
+                await HandleSetAdIntervalAsync(botClient, message, cancellationToken);
+                break;
+
+            case "/togglegroupads":
+                await HandleToggleGroupAdsAsync(botClient, message, cancellationToken);
+                break;
+        }
+    }
+
     private async Task HandleAdminCommandAsync(ITelegramBotClient botClient, Message message, CancellationToken cancellationToken)
     {
         var command = message.Text?.ToLower().Trim();
@@ -170,7 +234,15 @@ public class BotUpdateHandler : IUpdateHandler
 
             case "/stats":
             case "/statistics":
-                await SendStatisticsAsync(botClient, message.Chat.Id, cancellationToken);
+                // If in private chat or group, show appropriate stats
+                if (message.Chat.Type == ChatType.Private)
+                {
+                    await SendStatisticsAsync(botClient, message.Chat.Id, cancellationToken);
+                }
+                else
+                {
+                    await SendGroupStatisticsAsync(botClient, message.Chat.Id, cancellationToken);
+                }
                 break;
 
             case "/groups":
@@ -224,13 +296,19 @@ public class BotUpdateHandler : IUpdateHandler
 /groups - Bot qo'shilgan guruhlar ro'yxati
 
 📢 Reklama Buyruqlari:
-/addad <matn> - Yangi reklama qo'shish
+/addad <matn> - Matnli reklama qo'shish
+🖼️ Rasm yuboring + caption - Rasmli reklama qo'shish
 /listads - Barcha reklamalar ro'yxati
 /deletead <id> - Reklamani o'chirish
 /togglead <id> - Reklamani yoqish/o'chirish
 /adstats - Reklama statistikasi
 /setadinterval <daqiqa> - Guruh uchun interval o'rnatish
 /togglegroupads - Guruhda reklamalarni yoqish/o'chirish
+
+💡 Rasmli reklama qo'shish:
+1. Botga rasm yuboring
+2. Caption'da reklama matnini yozing
+3. Tayyor! Bot avtomatik qo'shadi
 
 🔧 Sozlashlar:
 - Bot guruhda admin bo'lishi kerak
@@ -246,7 +324,6 @@ public class BotUpdateHandler : IUpdateHandler
     private async Task SendStatisticsAsync(ITelegramBotClient botClient, long chatId, CancellationToken cancellationToken)
     {
         var allStats = _databaseService.GetAllStatistics();
-        var groups = _databaseService.GetAllGroups();
 
         if (!allStats.Any())
         {
@@ -258,22 +335,26 @@ public class BotUpdateHandler : IUpdateHandler
             return;
         }
 
-        var statsText = "📊 Bot Statistikasi:\n\n";
+        var statsText = "📊 Bot Statistikasi (Barcha Guruhlar):\n\n";
 
         foreach (var stat in allStats)
         {
-            var group = groups.FirstOrDefault(g => g.ChatId == stat.ChatId);
+            // Try to get the most up-to-date group title
+            var group = _databaseService.GetGroup(stat.ChatId);
             var groupTitle = group?.Title ?? stat.ChatTitle ?? $"Chat {stat.ChatId}";
 
-            statsText += $"📍 {groupTitle}\n";
-            statsText += $"   👋 Kirish xabarlari: {stat.DeletedJoinMessages}\n";
-            statsText += $"   👋 Chiqish xabarlari: {stat.DeletedLeaveMessages}\n";
-            statsText += $"   🚫 Spam xabarlari: {stat.DeletedSpamMessages}\n";
+            var statusEmoji = group?.IsActive == true ? "✅" : "❌";
+
+            statsText += $"{statusEmoji} {groupTitle}\n";
+            statsText += $"   ID: {stat.ChatId}\n";
+            statsText += $"   👋 Kirish: {stat.DeletedJoinMessages} | Chiqish: {stat.DeletedLeaveMessages}\n";
+            statsText += $"   🚫 Spam: {stat.DeletedSpamMessages}\n";
             statsText += $"   ✅ Jami: {stat.DeletedJoinMessages + stat.DeletedLeaveMessages + stat.DeletedSpamMessages}\n\n";
         }
 
         var totalDeleted = allStats.Sum(s => s.DeletedJoinMessages + s.DeletedLeaveMessages + s.DeletedSpamMessages);
-        statsText += $"🎯 Umumiy o'chirilgan xabarlar: {totalDeleted}";
+        statsText += $"🎯 Umumiy o'chirilgan xabarlar: {totalDeleted}\n";
+        statsText += $"📁 Jami guruhlar: {allStats.Count}";
 
         await botClient.SendTextMessageAsync(
             chatId,
@@ -284,7 +365,7 @@ public class BotUpdateHandler : IUpdateHandler
 
     private async Task SendGroupsListAsync(ITelegramBotClient botClient, long chatId, CancellationToken cancellationToken)
     {
-        var groups = _databaseService.GetAllGroups();
+        var groups = _databaseService.GetAllGroupsIncludingInactive();
 
         if (!groups.Any())
         {
@@ -296,14 +377,36 @@ public class BotUpdateHandler : IUpdateHandler
             return;
         }
 
-        var groupsText = $"📁 Bot {groups.Count} ta guruhda:\n\n";
+        var activeGroups = groups.Where(g => g.IsActive).ToList();
+        var inactiveGroups = groups.Where(g => !g.IsActive).ToList();
 
-        foreach (var group in groups.OrderByDescending(g => g.JoinedAt))
+        var groupsText = $"📁 Bot Guruhlari ({groups.Count} ta):\n\n";
+
+        // Active groups
+        if (activeGroups.Any())
         {
-            groupsText += $"• {group.Title ?? "Noma'lum"}\n";
-            groupsText += $"  ID: {group.ChatId}\n";
-            groupsText += $"  Qo'shildi: {group.JoinedAt:dd.MM.yyyy HH:mm}\n\n";
+            groupsText += "✅ AKTIV GURUHLAR:\n\n";
+            foreach (var group in activeGroups.OrderByDescending(g => g.JoinedAt))
+            {
+                groupsText += $"• {group.Title ?? "Noma'lum"}\n";
+                groupsText += $"  ID: {group.ChatId}\n";
+                groupsText += $"  Qo'shildi: {group.JoinedAt:dd.MM.yyyy HH:mm}\n\n";
+            }
         }
+
+        // Inactive groups
+        if (inactiveGroups.Any())
+        {
+            groupsText += "❌ NOAKTIV GURUHLAR (Bot o'chirilgan):\n\n";
+            foreach (var group in inactiveGroups.OrderByDescending(g => g.JoinedAt))
+            {
+                groupsText += $"• {group.Title ?? "Noma'lum"}\n";
+                groupsText += $"  ID: {group.ChatId}\n";
+                groupsText += $"  Qo'shildi: {group.JoinedAt:dd.MM.yyyy HH:mm}\n\n";
+            }
+        }
+
+        groupsText += $"📊 Aktiv: {activeGroups.Count} | Noaktiv: {inactiveGroups.Count}";
 
         await botClient.SendTextMessageAsync(
             chatId,
@@ -343,7 +446,7 @@ public class BotUpdateHandler : IUpdateHandler
         {
             await botClient.SendTextMessageAsync(
                 chatId,
-                "📭 Hozircha reklamalar yo'q.\n\nYangi reklama qo'shish: /addad <matn>",
+                "📭 Hozircha reklamalar yo'q.\n\nYangi reklama qo'shish:\n• Matn: /addad <matn>\n• Rasm: Rasm yuboring + caption yozing",
                 cancellationToken: cancellationToken
             );
             return;
@@ -354,8 +457,14 @@ public class BotUpdateHandler : IUpdateHandler
         foreach (var ad in ads)
         {
             var status = ad.IsActive ? "✅ Aktiv" : "❌ O'chirilgan";
+            var mediaIcon = !string.IsNullOrEmpty(ad.MediaType) ? GetMediaIcon(ad.MediaType) : "📝";
+
             adsText += $"ID: {ad.Id} - {status}\n";
-            adsText += $"📝 {ad.Text}\n";
+            adsText += $"{mediaIcon} {(ad.Text.Length > 50 ? ad.Text.Substring(0, 50) + "..." : ad.Text)}\n";
+            if (!string.IsNullOrEmpty(ad.MediaType))
+            {
+                adsText += $"🎬 Turi: {ad.MediaType}\n";
+            }
             adsText += $"📅 Yaratildi: {ad.CreatedAt:dd.MM.yyyy HH:mm}\n\n";
         }
 
@@ -364,6 +473,41 @@ public class BotUpdateHandler : IUpdateHandler
             adsText,
             cancellationToken: cancellationToken
         );
+    }
+
+    private async Task HandleAddMediaAdAsync(ITelegramBotClient botClient, Message message, string mediaType, string fileId, CancellationToken cancellationToken)
+    {
+        var caption = message.Caption ?? "";
+
+        if (string.IsNullOrWhiteSpace(caption))
+        {
+            await botClient.SendTextMessageAsync(
+                message.Chat.Id,
+                "❌ Rasm uchun caption (matn) yozing!\n\nMisol: Rasm yuboring va caption'da reklamangizni yozing.",
+                cancellationToken: cancellationToken
+            );
+            return;
+        }
+
+        _databaseService.AddAdvertisementWithMedia(caption, mediaType, fileId);
+
+        var mediaIcon = GetMediaIcon(mediaType);
+        await botClient.SendTextMessageAsync(
+            message.Chat.Id,
+            $"✅ {mediaIcon} Rasmli reklama qo'shildi!\n\n📝 Matn: {caption}\n🎬 Turi: {mediaType}",
+            cancellationToken: cancellationToken
+        );
+    }
+
+    private string GetMediaIcon(string mediaType)
+    {
+        return mediaType?.ToLower() switch
+        {
+            "photo" => "🖼️",
+            "video" => "🎥",
+            "document" => "📄",
+            _ => "📝"
+        };
     }
 
     private async Task HandleDeleteAdAsync(ITelegramBotClient botClient, Message message, CancellationToken cancellationToken)
@@ -600,11 +744,88 @@ Guruhingizni toza va xavfsiz saqlashda yordam beraman! 🚀";
 
     private async Task HandleChatMemberAsync(ITelegramBotClient botClient, ChatMemberUpdated chatMember, CancellationToken cancellationToken)
     {
+        var chatId = chatMember.Chat.Id;
+        var chatTitle = chatMember.Chat.Title ?? "Unknown Group";
+
+        // Ensure group is tracked (in case it wasn't added before)
+        _databaseService.AddOrUpdateGroup(chatId, chatTitle);
+
         // Track when users join via this event too
         if (chatMember.NewChatMember.Status == ChatMemberStatus.Member ||
             chatMember.NewChatMember.Status == ChatMemberStatus.Restricted)
         {
-            _databaseService.TrackUserJoin(chatMember.NewChatMember.User.Id, chatMember.Chat.Id);
+            _databaseService.TrackUserJoin(chatMember.NewChatMember.User.Id, chatId);
+        }
+    }
+
+    private async Task SendGroupHelpMessageAsync(ITelegramBotClient botClient, long chatId, CancellationToken cancellationToken)
+    {
+        var helpText = @"🤖 SmartBot - Guruh Uchun Yordam
+
+📊 Mavjud Buyruqlar:
+/help - Yordam
+/stats - Bu guruh statistikasi
+
+🔧 Sozlashlar (Guruh Adminlari):
+/setadinterval <daqiqa> - Reklama intervali
+/togglegroupads - Reklamalarni yoqish/o'chirish
+
+ℹ️ Bot avtomatik ravishda:
+✅ Kirish/Chiqish xabarlarini o'chiradi
+✅ Spam xabarlarini bloklaydi
+✅ Statistika yig'adi";
+
+        await botClient.SendTextMessageAsync(
+            chatId,
+            helpText,
+            cancellationToken: cancellationToken
+        );
+    }
+
+    private async Task SendGroupStatisticsAsync(ITelegramBotClient botClient, long chatId, CancellationToken cancellationToken)
+    {
+        var stat = _databaseService.GetStatistics(chatId);
+        var group = _databaseService.GetGroup(chatId);
+        var groupTitle = group?.Title ?? stat.ChatTitle ?? "Bu guruh";
+
+        if (stat.DeletedJoinMessages == 0 && stat.DeletedLeaveMessages == 0 && stat.DeletedSpamMessages == 0)
+        {
+            await botClient.SendTextMessageAsync(
+                chatId,
+                $"📊 {groupTitle}\n\nHozircha statistika yo'q.",
+                cancellationToken: cancellationToken
+            );
+            return;
+        }
+
+        var statsText = $"📊 {groupTitle} - Statistika\n\n";
+        statsText += $"ID: {chatId}\n\n";
+        statsText += $"👋 Kirish xabarlari: {stat.DeletedJoinMessages}\n";
+        statsText += $"👋 Chiqish xabarlari: {stat.DeletedLeaveMessages}\n";
+        statsText += $"🚫 Spam xabarlari: {stat.DeletedSpamMessages}\n\n";
+
+        var total = stat.DeletedJoinMessages + stat.DeletedLeaveMessages + stat.DeletedSpamMessages;
+        statsText += $"✅ Jami o'chirilgan: {total}";
+
+        await botClient.SendTextMessageAsync(
+            chatId,
+            statsText,
+            cancellationToken: cancellationToken
+        );
+    }
+
+    private async Task<bool> IsUserGroupAdmin(ITelegramBotClient botClient, long chatId, long userId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var chatMember = await botClient.GetChatMemberAsync(chatId, userId, cancellationToken);
+            return chatMember.Status == ChatMemberStatus.Administrator ||
+                   chatMember.Status == ChatMemberStatus.Creator;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error checking if user {UserId} is admin in chat {ChatId}", userId, chatId);
+            return false;
         }
     }
 

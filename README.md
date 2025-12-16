@@ -83,16 +83,21 @@ Bot bilan shaxsiy chatda yoki guruhda (agar siz admin bo'lsangiz):
 - `/stats` - Barcha guruhlar bo'yicha batafsil statistika
 - `/groups` - Bot qaysi guruhlarda ekanligini ko'rish
 
-### 📢 Reklama buyruqlari (opsional):
-- `/addad <matn>` - Yangi reklama qo'shish
+### 📢 Reklama buyruqlari:
+- `/addad <matn>` - Matnli reklama qo'shish
+- 🖼️ **Rasm yuboring + caption** - Rasmli reklama qo'shish (yangi!)
 - `/listads` - Barcha reklamalar ro'yxati
 - `/deletead <id>` - Reklamani o'chirish
 - `/togglead <id>` - Reklamani yoqish/o'chirish
 - `/adstats` - Reklama statistikasi
-- `/setadinterval <daqiqa>` - Guruh uchun interval sozlash
-- `/togglegroupads` - Guruhda reklamalarni yoqish/o'chirish
+- `/setadinterval <daqiqa>` - Guruh uchun interval sozlash (guruh adminlari)
+- `/togglegroupads` - Guruhda reklamalarni yoqish/o'chirish (guruh adminlari)
 
-> 💡 **Eslatma**: Reklama tizimi default holatda **o'chirilgan**. Yoqish uchun `appsettings.json` da `"Advertising": { "Enabled": true }` qiling.
+> 💡 **Eslatma**: Reklama tizimi **yoqilgan**. `appsettings.json` da interval va sozlamalarni o'zgartirishingiz mumkin.
+>
+> 🖼️ **Rasmli reklama**: Botga rasm yuboring va caption'da matn yozing - avtomatik reklama qo'shiladi!
+>
+> 📖 **Batafsil qo'llanma**: [REKLAMA_QOSHISH.md](REKLAMA_QOSHISH.md) faylini o'qing!
 
 ## ⚙️ Sozlamalar
 

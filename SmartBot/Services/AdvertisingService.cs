@@ -122,11 +122,54 @@ public class AdvertisingService : IAdvertisingService
     {
         try
         {
-            await botClient.SendTextMessageAsync(
-                chatId,
-                ad.Text,
-                cancellationToken: cancellationToken
-            );
+            // Check if ad has media
+            if (!string.IsNullOrEmpty(ad.MediaType) && !string.IsNullOrEmpty(ad.MediaFileId))
+            {
+                // Send media with caption
+                switch (ad.MediaType.ToLower())
+                {
+                    case "photo":
+                        await botClient.SendPhotoAsync(
+                            chatId,
+                            new Telegram.Bot.Types.InputFileId(ad.MediaFileId),
+                            caption: ad.Text,
+                            cancellationToken: cancellationToken
+                        );
+                        break;
+
+                    case "video":
+                        await botClient.SendVideoAsync(
+                            chatId,
+                            new Telegram.Bot.Types.InputFileId(ad.MediaFileId),
+                            caption: ad.Text,
+                            cancellationToken: cancellationToken
+                        );
+                        break;
+
+                    case "document":
+                        await botClient.SendDocumentAsync(
+                            chatId,
+                            new Telegram.Bot.Types.InputFileId(ad.MediaFileId),
+                            caption: ad.Text,
+                            cancellationToken: cancellationToken
+                        );
+                        break;
+
+                    default:
+                        _logger.LogWarning("Unknown media type {MediaType} for ad {AdId}", ad.MediaType, ad.Id);
+                        await botClient.SendTextMessageAsync(chatId, ad.Text, cancellationToken: cancellationToken);
+                        break;
+                }
+            }
+            else
+            {
+                // Send text only
+                await botClient.SendTextMessageAsync(
+                    chatId,
+                    ad.Text,
+                    cancellationToken: cancellationToken
+                );
+            }
 
             var allAds = _databaseService.GetAllAdvertisements()
                 .Where(a => a.IsActive)
@@ -137,7 +180,7 @@ public class AdvertisingService : IAdvertisingService
             _databaseService.UpdateLastAdSent(chatId, adIndex);
             _databaseService.IncrementAdSent(chatId, ad.Id);
 
-            _logger.LogInformation("Sent ad {AdId} to group {ChatId}", ad.Id, chatId);
+            _logger.LogInformation("Sent ad {AdId} (type: {MediaType}) to group {ChatId}", ad.Id, ad.MediaType ?? "text", chatId);
         }
         catch (ApiRequestException ex) when (ex.Message.Contains("chat not found"))
         {

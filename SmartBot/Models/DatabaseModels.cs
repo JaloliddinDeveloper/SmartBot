@@ -35,6 +35,9 @@ public class Advertisement
     public bool IsActive { get; set; }
     public DateTime CreatedAt { get; set; }
     public int DisplayOrder { get; set; }
+
+  public string? MediaType { get; set; } // "photo", "video", "document", null
+    public string? MediaFileId { get; set; } // Telegram file ID
 }
 
 public class GroupAdSettings
